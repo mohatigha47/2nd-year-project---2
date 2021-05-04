@@ -1,0 +1,278 @@
+/*
+  Project:   Stopwatch and Digital Clock
+  Author:    LAGSILVA
+  Hardware:  Arduino UNO-R3 & Multi-Shield
+  Date:      30.Sep.2018
+  Revision:  V1.4
+  License:   CC BY-NC-ND 4.0
+             (Attribution-NonCommercial-NoDerivatives 4.0 International)
+*/
+
+#include <Time.h>                               // Time library
+#include <TimeLib.h>
+#include <MsTimer2.h>                           // Timer library
+
+// Module connection pins (Digital Pins)
+#define LATCH_PIN 4                             // Arduino UNO conection on Pin #4  = Latch of Display Module
+#define CLK_PIN 7                               // Arduino UNO conection on Pin #7  = Clock of Display Module
+#define DATA_PIN 8                              // Arduino UNO conection on Pin #8  = Data of Display Module
+
+#define BTN_1_PIN A1
+#define BTN_2_PIN A2
+#define BTN_3_PIN A3
+
+//    Display:
+
+//        A
+//      ----
+//   F |    | B
+//      -G -
+//   E |    | C
+//      ----
+//       D
+
+//   Chars Code
+byte N[] = {0xFC, 0x60, 0xDA, 0xF2, 0x66, 0xB6, 0xBE, 0xE0, 0xFE, 0xF6, 0xC6};
+
+byte mode = 0;
+int chrono, countdown, minutoCount = 1, segundoCount = 0, hora = 0, minuto = 0, minutoStart = 1;
+unsigned long tiChrono, tiCountdown, lastT, diffTime = 0, lastTime = 0;
+boolean ajustaHora = true, ajustaMinuto = true, chronograph = true;
+boolean startChrono = false, startCountdown = false;
+boolean lap = false;
+boolean buzzerStatus = false;
+
+
+void setup() {
+
+  pinMode(LATCH_PIN, OUTPUT);
+  pinMode(CLK_PIN, OUTPUT);
+  pinMode(DATA_PIN, OUTPUT);
+
+  pinMode(BTN_1_PIN, INPUT);
+  pinMode(BTN_2_PIN, INPUT);
+  pinMode(BTN_3_PIN, INPUT);
+
+  pinMode(13, OUTPUT);
+  digitalWrite(13, HIGH);
+
+  pinMode(3, OUTPUT);                                       // Buzzer pin
+  digitalWrite(3, HIGH);                                    // Buzzer off
+
+  MsTimer2::set(130, kbdRead);                              // Timer library for buttons reading
+  MsTimer2::start();
+
+}
+
+
+void loop() {
+
+  if (mode == 0) {                                          // Clock Mode
+
+    int hora = hour();
+    int minuto = minute();
+
+    int dezenaHora = hora / 10;
+    int unidadeHora = hora % 10;
+    int dezenaMinuto = minuto / 10;
+    int unidadeMinuto = minuto % 10;
+
+    displayChars(N[dezenaHora], 0);                         // Display Digit 0
+    displayChars(N[unidadeHora], 1);                        // Display Digit 1
+    displayChars(N[dezenaMinuto], 2);                       // Display Digit 2
+    displayChars(N[unidadeMinuto], 3);                      // Display Digit 3
+    displayChars(1, 1);                                     // Display Dot at Digit 2
+    displayChars(1, 3);                                     // Display Dot at Digit 4
+    displayChars(0, 3);                                     // Reset Dot at Digit 4
+
+    buzzer();
+
+  }
+
+
+  if (mode == 1) {                                                // Chronograph Mode
+
+    if (startChrono == true && lap == false) {                    // Start Chronograph
+      chrono = ((millis() - tiChrono) / 10 + lastT);
+      diffTime = chrono - lastTime;
+    }
+
+    int tempChrono = chrono % 10000;
+
+    if (startChrono == false && lap == false) {                   // Stop Chronograph
+      tiChrono = millis();
+      lastT = chrono;
+      lastTime = 0;
+    }
+
+    if (startChrono == false && lap == true) {                    // Stop Chronograph and exit LAP (lapse time) mode
+      chrono = ((millis() - tiChrono) / 10 + lastT) % 10000;
+      lap = false;
+    }
+
+    if (startChrono == true && lap == true) {                     // Start LAP (lapse time) mode
+      lastTime = chrono;
+      chrono = diffTime;
+    }
+
+    if (chrono >= 29999) {
+      startChrono = false;
+      tempChrono = 9999;
+    }
+
+    int dezenaSeg = tempChrono / 1000;
+    int unidadeSeg = tempChrono / 100 % 10;
+    int dezenaCentesimo = tempChrono % 100 / 10;
+    int unidadeCentesimo = tempChrono % 10;
+
+    displayChars(N[dezenaSeg], 0);                         // Display Digit 0
+    displayChars(N[unidadeSeg], 1);                        // Display Digit 1
+    displayChars(N[dezenaCentesimo], 2);                   // Display Digit 2
+    displayChars(N[unidadeCentesimo], 3);                  // Display Digit 3
+    displayChars(1, 1);                                    // Display Dot at Digit 2
+    displayChars(0, 1);                                    // Reset Dot at Digit 2
+
+    if (chrono > 9999) {
+      displayChars(1, 3);                                  // Display Dot at Digit 4 (>=100s)
+      displayChars(0, 3);                                  // Reset Dot at Digit 4 (>=100s)
+    }
+    else {
+      displayChars(0, 3);                                  // Reset Display Dot at Digit 4
+    }
+
+    if (chrono > 19999) {
+      displayChars(1, 2);                                  // Display Dot at Digit 3 (>=200s)
+      displayChars(0, 2);                                  // Reset Dot at Digit 3 (>=200s)
+    }
+    else {
+      displayChars(0, 2);                                  // Reset Display Dot at Digit 4
+    }
+
+    buzzer();
+
+  }
+
+
+  if (mode == 2) {                                          // Countdown Mode
+
+    if (startCountdown == true) {
+      countdown = (millis() - tiCountdown) / 1000;
+      minutoCount = (minutoStart * 60 - countdown) / 60;
+      segundoCount = (minutoStart * 60 - countdown) % 60;
+    }
+
+    if (startCountdown == false) {
+      tiCountdown = millis();
+      minutoCount = minutoStart;
+      segundoCount = 0;
+      buzzerStatus = false;
+    }
+
+    if (minutoCount >= 0 && segundoCount >= 0) {
+      int dezenaMinuto = minutoCount / 10;
+      int unidadeMinuto = minutoCount % 10;
+      int dezenaSegundo = segundoCount / 10;
+      int unidadeSegundo = segundoCount % 10;
+
+      displayChars(N[dezenaMinuto], 0);                     // Display Digit 0
+      displayChars(N[unidadeMinuto], 1);                    // Display Digit 1
+      displayChars(N[dezenaSegundo], 2);                    // Display Digit 2
+      displayChars(N[unidadeSegundo], 3);                   // Display Digit 3
+      displayChars(1, 1);                                   // Display Dot at Digit 2
+      displayChars(0, 1);                                   // Reset Dot at Digit 2
+    }
+    else {
+      displayChars(1, 0);                                   // Display Dot at Digit 0
+      displayChars(1, 1);                                   // Display Dot at Digit 1
+      displayChars(1, 2);                                   // Display Dot at Digit 2
+      displayChars(1, 3);                                   // Display Dot at Digit 3
+      displayChars(0, 3);                                   // Reset Dot at Digit 3
+
+      buzzerStatus = true;                                  // Start buzzer alarm
+    }
+
+    buzzer();
+
+  }
+
+}
+
+
+void displayChars(byte num, byte disp) {                    // Chars Display Routine
+
+  byte k, charsM = 0;
+
+  charsM = num;
+
+  digitalWrite(LATCH_PIN, LOW);
+  shiftOut(DATA_PIN, CLK_PIN, LSBFIRST, ~charsM);           // Display number
+  shiftOut(DATA_PIN, CLK_PIN, LSBFIRST, 128 >> disp);       // Set Digits (0-1-2-3)
+  digitalWrite(LATCH_PIN, HIGH);
+
+}
+
+
+void kbdRead() {                                                  // Push Buttons Reading
+
+  ajustaHora = digitalRead(BTN_1_PIN);
+  ajustaMinuto = digitalRead(BTN_2_PIN);
+  chronograph = digitalRead(BTN_3_PIN);
+
+  if (!chronograph) {                                             // Set Mode (Clock = 0 / Chronograph = 1 / Countdown = 2)
+    mode = (mode + 1) % 3;
+  }
+
+  if (!ajustaHora && mode == 0) {                                 // Set Hour
+    adjustTime(3600);
+  }
+
+  if (!ajustaMinuto && mode == 0) {                               // Set Minute
+    adjustTime(60);
+  }
+
+  if (!ajustaHora && mode == 1) {                                 // Chronograph Status (Start = TRUE / Stop = FALSE)
+    startChrono = !startChrono;
+  }
+
+  if (!ajustaMinuto && mode == 1 && startChrono == true) {        // Chronograph in mode LAP (Lapse Time)
+    lap = !lap;
+    lastTime = 0;
+  }
+
+  if (!ajustaMinuto && mode == 1 && startChrono == false) {       // Reset Chronograph
+    chrono = 0;
+    startChrono = false;
+  }
+
+  if (!ajustaHora && mode == 2) {                                 // Start Countdown
+    startCountdown = !startCountdown;
+  }
+
+  if (!ajustaMinuto && mode == 2 && startCountdown == false) {    // Set Countdown time
+    minutoStart = constrain((minutoStart + 1) % 100, 1, 99);
+    segundoCount = 0;
+  }
+
+}
+
+
+void buzzer() {                                                   // Buzzer Alarm
+
+  if (startCountdown == true) {
+    countdown = (millis() - tiCountdown) / 1000;
+    minutoCount = (minutoStart * 60 - countdown) / 60;
+    segundoCount = (minutoStart * 60 - countdown) % 60;
+  }
+
+  if (minutoCount == 0 && segundoCount == 0) {                    // Start buzzer alarm
+    buzzerStatus = true;
+  }
+
+  if (buzzerStatus == true) {                                     // Buzzer alarm on
+    digitalWrite(3, LOW);
+    delayMicroseconds(50);
+    digitalWrite(3, HIGH);
+    delay(50);
+  }
+
+}
